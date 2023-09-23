@@ -1,0 +1,144 @@
+---
+- name: Instalación y configuración LAMP, MySQL, y despliegue de aplicación
+  hosts: all
+  become: yes
+
+  vars_prompt:
+    - name: mysql_root_password
+      prompt: "contraseña para root"
+      private: yes
+
+  vars:
+    mysql_db_name: "formulario"
+    mysql_db_user: "gerardol"
+    mysql_db_password: "123"
+
+  tasks:
+    - name: Actualizar caché de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Instalar Apache
+      apt:
+        name: apache2
+        state: present
+
+    - name: Instalar MySQL
+      apt:
+        name: mysql-server
+        state: present
+
+    - name: Instalar PHP y módulos
+      apt:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - php
+        - libapache2-mod-php
+        - php-mysql
+
+    - name: Reiniciar Apache
+      service:
+        name: apache2
+        state: restarted
+
+    - name: Actualizar la lista de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Instalar pkg-config
+      apt:
+        name: pkg-config
+        state: present
+
+    - name: Instalar pip3
+      apt:
+        name: python3-pip
+
+    - name: Instalar python3-dev y libmysqlclient-dev
+      apt:
+        name:
+          - python3-dev
+          - libmysqlclient-dev
+        state: present
+
+    - name: Instalar mysqlclient
+      pip:
+        name: mysqlclient
+      become_user: root
+
+    - name: Crear usuario de base de datos
+      mysql_user:
+        name: "{{ mysql_db_user }}"
+        password: "{{ mysql_db_password }}"
+        host: localhost
+      become_user: root
+
+    - name: Dar permisos al usuario en la base de datos
+      mysql_user:
+        name: "{{ mysql_db_user }}"
+        priv: "{{ mysql_db_name }}.*:ALL"
+        host: localhost
+      become_user: root
+
+    - name: Crear base de datos
+      mysql_db:
+        name: "{{ mysql_db_name }}"
+        state: present
+        login_user: "{{ mysql_db_user }}"
+        login_password: "{{ mysql_db_password }}"
+      become_user: root
+
+    - name: Seleccionar la base de datos
+      mysql_query:
+        login_user: "{{ mysql_db_user }}"
+        login_password: "{{ mysql_db_password }}"
+        query: "USE {{ mysql_db_name }}"
+      become_user: root
+
+    - name: Crear tabla 'datos'
+      mysql_query:
+        login_user: "{{ mysql_db_user }}"
+        login_password: "{{ mysql_db_password }}"
+        query: |
+          CREATE TABLE IF NOT EXISTS {{ mysql_db_name }}.datos (
+            id INT(50) AUTO_INCREMENT PRIMARY KEY,
+            nombre VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+            contraseña VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+            email VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+            telefono INT(20) NOT NULL,
+            fecha INT(20) NOT NULL
+          )
+      become_user: root
+
+    - name: Clone repository
+      git:
+        repo: 'https://github.com/GerardoLaraGonzalez/formulario.git'
+        dest: /var/www/html/formulario
+
+    - name: Change port to 8080 in /etc/apache2/ports.conf
+      lineinfile:
+        path: /etc/apache2/ports.conf
+        regexp: '^Listen 80'
+        line: 'Listen 8080'
+
+    - name: Change port to 8080 in /etc/apache2/sites-enabled/000-default.conf
+      lineinfile:
+        path: /etc/apache2/sites-enabled/000-default.conf
+        regexp: '^<VirtualHost \*:80>'
+        line: '<VirtualHost *:8080>'
+
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+
+- name: Iniciar MySQL
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Iniciar servicio MySQL
+      systemd:
+        name: mysql
+        state: started
